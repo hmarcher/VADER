@@ -1,5 +1,6 @@
 var http = require('http'); 
 var fs = require('fs'); 
+var S = require('string');
 var util=require('util');
 var querystring=require('querystring');
 var sqlite3 = require('sqlite3').verbose(); 
@@ -258,11 +259,12 @@ function updatePidentity(loc, org, piDee, piip)
 	   console.log("8. row.location, row.Orgcode: "+ row.Location, row.Orgcode);
 	   locintab = row.Location;
 	   orgintab = row.Orgcode;
+	   piipintab = row.IP_address;
 	   console.log("9. inside .run locintab and orgintab: "+ locintab, orgintab);
 		
-		if(loc != locintab || org != orgintab)
+		if(loc != locintab || org != orgintab || piip != piipintab)
 		{
-		   db.run("UPDATE Pidentities SET Location = '" +loc+"', Orgcode = '" +org+"' WHERE rowid =  "+ piDee);
+		   db.run("UPDATE Pidentities SET Location = '" +loc+"', Orgcode = '" +org+"', IP_address = '" +piip+ "' WHERE rowid =  "+ piDee);
 		   console.log("9.5 Lovely if statement about location and org");
 		   //db.run("UPDATE Pidentities SET Orgcode = '" +org +"' WHERE rowid = "+ piDee);
 		}  
@@ -416,23 +418,12 @@ http.createServer(function (inreq, res)
 	
 }).listen(8124);
 
-function checkboxName(name)
-{
-    var piname = '';
-	var locSelect = db.prepare("SELECT Location FROM Pidentities WHERE rowid = " + name);
-	locSelect.get(function (err, row){
-	    piname = row.Location;
-	    console.log(piname);
-	});
-	locSelect.finalize();
 
-}	
+
 //EMERGENCY ALERT
 var HTMLserver=http.createServer(function(req,res)
 {
 	console.log('collectDATA for Emergency Service');
-	
-	
 	
 	if (req.method=='GET')
 	{
@@ -485,20 +476,95 @@ var HTMLserver=http.createServer(function(req,res)
 	else
 	{
 		var alert = '';
+			
 		req.on('data', function (data)
 		{
 			alert += data;
-			
+	
 		});
-		
-		alertChunk = JSON.parse(alert);
-		console.log(alertChunk.Destination);
-		
+	
 		req.on('end', function () 
 		{
+
 			console.log(alert + "<-Posted Data Test");
 			res.end(util.inspect(querystring.parse(alert)));
-			res.end(util.inspect(querystring.parse(alert)));
+			alertChunk = querystring.parse(alert);
+			console.log(alertChunk.Destination);
+			
+			var piipSelect = "SELECT IP_Address FROM Pidentities WHERE ";
+			alertChunk.Destination.forEach(function(currentIterationOfLoop)
+			{
+				piipSelect += "rowid = " + currentIterationOfLoop + " OR ";
+			});
+			console.log(piipSelect);
+			piipSelect = S(piipSelect).chompRight(" OR ").s;
+			console.log(piipSelect);
+			var stmt2= db.prepare(piipSelect);
+		
+			stmt2.each(function(err, row){
+			    console.log(row.IP_address);
+				playEmergency(row.IP_address);
+			});
+
 		});
 	}
+
+	
 }).listen(8080); 
+
+
+function playEmergency(piip)
+{
+  
+    var user = { 
+		  jsonrpc: '2.0', 
+		  id: '1', 
+		  method: 'Player.Open', 
+		  params: {
+			item: {
+			    directory: SMB_MNT_ROOT + "/Emergency"
+			 }
+		  }
+		}; 
+	   
+	 var userString = JSON.stringify(user); 
+       console.log(userString, piip);
+	   var headers = { 
+		  'Content-Type': 'application/json', 
+		  'Content-Length': userString.length 
+	   };
+	 
+	   var options = { 
+		  host: piip, 
+		  port: 80, 
+		  path: '/jsonrpc', 
+		  method: 'POST', 
+		  headers: headers 
+	   }; 
+	   
+	    var outreq = http.request(options, function(res) { 
+		  console.log('start of outgoing request');
+
+		  res.setEncoding('utf-8'); 
+		  var responseString = ''; 
+		  
+		  res.on('data', function(data) 
+		  {
+			 responseString += data;
+		  }); 
+		
+		 console.log('Leaving outgoing request');
+		 
+		  res.on('end', function() { 
+			 var resultObject = JSON.parse(responseString); 
+			 responseString = '';
+		   }); 
+	   }); 
+
+	   outreq.on('error', function(e) { 
+		  // TODO: handle error. 
+		});
+
+	  outreq.write(userString); 
+	  outreq.end();
+}
